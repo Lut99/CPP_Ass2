@@ -3,7 +3,7 @@ SRCFILES = assign2_1.c file.c timer.c simulate.c
 TARNAME = assign2_1.tgz
 
 RUNARGS = 433 1000000 # i_max t_max, increase this when testing on the DAS4!
-NODES = 8 # How many DAS4 nodes
+NODES = 1 # How many DAS4 nodes
 PROCESSESPERNODE = 8 # How many processes to spawn on one machine.
 
 PRUNARGS = -v -np $(NODES) -$(PROCESSESPERNODE) \

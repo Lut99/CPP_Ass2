@@ -20,6 +20,11 @@ const double c = 0.15;
 
 
 /* Add any functions you may need (like a worker) here. */
+inline double compute(int i, double *old_array, double *current_array) {
+    return 2 * current_array[i] - old_array[i] + c * 
+           (current_array[i - 1] - (2 * current_array[i] - 
+            current_array[i + 1]));
+}
 
 
 /*
@@ -38,6 +43,8 @@ double *simulate(const int i_max, const int t_max, double *old_array,
 {
     int t, i, n_processes, process_rank, process_start_i, start_i, stop_i, process_share;
     double *temp;
+    MPI_Request send_L, send_R, recv_L, recv_R;
+    MPI_Status dummy;
 
     MPI_Init(NULL, NULL);
 
@@ -58,24 +65,49 @@ double *simulate(const int i_max, const int t_max, double *old_array,
 
     // Now that we know this, do the timesteps
     for (t = 0; t < t_max; t++) {
-        // First, make sure that current_array is up-to-date
-        MPI_Status status;
-        int number;
+        // First: fire-and-forget the sends and receives
         if (process_rank != 0) {
-            MPI_Send(&current_array[start_i], 1, MPI_DOUBLE, process_rank - 1, TAG_PREV_ITEM, MPI_COMM_WORLD);
-            MPI_Recv(&current_array[start_i - 1], 1, MPI_DOUBLE, process_rank - 1, TAG_NEXT_ITEM, MPI_COMM_WORLD, &status);
+            // Send to left
+            MPI_Isend(&current_array[start_i], 1, MPI_DOUBLE, process_rank - 1, TAG_PREV_ITEM, MPI_COMM_WORLD, &send_L);
+            MPI_Irecv(&current_array[start_i - 1], 1, MPI_DOUBLE, process_rank - 1, TAG_NEXT_ITEM, MPI_COMM_WORLD, &recv_L);
+            // printf("prank=%i, recv_from=%i\n", process_rank, process_rank - 1);
         }
         if (process_rank != n_processes - 1) {
-            MPI_Send(&current_array[stop_i - 1], 1, MPI_DOUBLE, process_rank + 1, TAG_NEXT_ITEM, MPI_COMM_WORLD);
-            MPI_Recv(&current_array[stop_i], 1, MPI_DOUBLE, process_rank + 1, TAG_PREV_ITEM, MPI_COMM_WORLD, &status);
+            // Send to right
+            MPI_Isend(&current_array[stop_i - 1], 1, MPI_DOUBLE, process_rank + 1, TAG_NEXT_ITEM, MPI_COMM_WORLD, &send_R);
+            // printf("prank=%i, sent_to=%i\n", process_rank, process_rank + 1);
+            MPI_Irecv(&current_array[stop_i], 1, MPI_DOUBLE, process_rank + 1, TAG_PREV_ITEM, MPI_COMM_WORLD, &recv_R);
         }
+        // printf("prank = %i, fired network operations\n", process_rank);
 
         // Now we can just do the loop normally
-        for (i = start_i; i < stop_i; i++) {
-            next_array[i] = 2 * current_array[i] - old_array[i] + c * 
-                            (current_array[i - 1] - (2 * current_array[i] - 
-                             current_array[i + 1]));
+        for (i = start_i + 1; i < stop_i - 1; i++) {
+            next_array[i] = compute(i, old_array, current_array);
+            //printf("prank = %i, t: %i, i: %i\n", process_rank, t, i);
         }
+
+        // printf("prank = %i, waiting for sends\n", process_rank);
+
+        // For certainty, wait until sends are completed
+        MPI_Wait(&send_L, &dummy);
+        MPI_Wait(&send_R, &dummy);
+
+        // printf("prank = %i, done waiting for sends\n", process_rank);
+
+        // Only continue once all receives have completed
+        if (process_rank != 0) {
+            // printf("prank = %i, before recv_L\n", process_rank);
+            MPI_Wait(&recv_L, &dummy);
+            // printf("prank = %i, after recv_L\n", process_rank);
+        }
+        next_array[start_i] = compute(start_i, old_array, current_array);
+        // printf("prank=%i, after computle_l\n", process_rank);
+        if (process_rank != n_processes - 1) {
+            // printf("prank = %i, before recv_R\n", process_rank);
+            MPI_Wait(&recv_R, &dummy);
+            // printf("prank = %i, after recv_R\n", process_rank);
+        }
+        next_array[stop_i - 1] = compute(stop_i - 1, old_array, current_array);
 
         // At the end, swap local arrays around
         temp = old_array;
@@ -83,6 +115,7 @@ double *simulate(const int i_max, const int t_max, double *old_array,
         current_array = next_array;
         next_array = temp;
     }
+    // printf("prank = %i, done w/timesteps\n", process_rank);
 
     // Join up to main
     if (process_rank == 0) {
@@ -95,7 +128,7 @@ double *simulate(const int i_max, const int t_max, double *old_array,
                 //   more work
                 process_share = (i_max - 1) - process_start_i;
             }
-            MPI_Recv(&current_array[process_start_i], process_share, MPI_DOUBLE, i, TAG_FINALIZE, MPI_COMM_WORLD, NULL);
+            MPI_Recv(&current_array[process_start_i], process_share, MPI_DOUBLE, i, TAG_FINALIZE, MPI_COMM_WORLD, &dummy);
         }
         MPI_Finalize();
         return current_array;
