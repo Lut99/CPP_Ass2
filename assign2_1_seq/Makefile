@@ -2,7 +2,7 @@ PROGNAME = assign2_1
 SRCFILES = assign2_1.c file.c timer.c simulate.c
 TARNAME = assign2_1.tgz
 
-RUNARGS = 1000 1000 # i_max t_max, increase this when testing on the DAS4!
+RUNARGS = 433 1000000 # i_max t_max, increase this when testing on the DAS4!
 NODES = 1 # How many DAS4 nodes
 PROCESSESPERNODE = 1 # How many processes to spawn on one machine.
 
@@ -33,7 +33,7 @@ run: $(PROGNAME)
 	prun $(PRUNARGS) $(PROGNAME) $(RUNARGS)
 
 runlocal: $(PROGNAME)
-	mpirun -n $(PROCESSESPERNODE) $(PROGNAME) $(RUNARGS)
+	mpirun -np $(PROCESSESPERNODE) $(PROGNAME) $(RUNARGS)
 
 plot: result.txt
 	gnuplot plot.gnp

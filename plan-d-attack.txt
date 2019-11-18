@@ -1,0 +1,9 @@
+PLAN D'ATTACK
+
+1) Sequential implementation
+    > Copy / paste from previous assignment
+2) MPI Implementation
+    > First, we implement using blocking sends / receive
+    > Then, we try to optimize it by utulizing non-blocked receivers
+3) Theory task
+4) Communication task

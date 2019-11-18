@@ -6,11 +6,17 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <mpi.h>
 
 #include "simulate.h"
 
+#define TAG_PREV_ITEM 0
+#define TAG_NEXT_ITEM 1
+#define TAG_FINALIZE 2
+
 
 /* Add any global variables you may need. */
+const double c = 0.15;
 
 
 /* Add any functions you may need (like a worker) here. */
@@ -30,11 +36,74 @@
 double *simulate(const int i_max, const int t_max, double *old_array,
         double *current_array, double *next_array)
 {
+    int t, i, n_processes, process_rank, process_start_i, start_i, stop_i, process_share;
+    double *temp;
 
-    /*
-     * Your implementation should go here.
-     */
+    MPI_Init(NULL, NULL);
 
-    /* You should return a pointer to the array with the final results. */
-    return current_array;
+    // Acquire information about the world
+    MPI_Comm_size(MPI_COMM_WORLD, &n_processes);
+    MPI_Comm_rank(MPI_COMM_WORLD, &process_rank);
+
+    // Compute what most processes' share is
+    process_share = (i_max - 2) / n_processes;
+    // Compute the boundries of the to-be-computed area. Note: stop_i is
+    //   exclusive.
+    start_i = process_rank * process_share + 1;
+    stop_i = start_i + process_share;
+    // The last process should receive the overflowing items
+    if (process_rank == n_processes - 1) {
+        stop_i = i_max - 1;
+    }
+
+    // Now that we know this, do the timesteps
+    for (t = 0; t < t_max; t++) {
+        // First, make sure that current_array is up-to-date
+        MPI_Status status;
+        int number;
+        if (process_rank != 0) {
+            MPI_Send(&current_array[start_i], 1, MPI_DOUBLE, process_rank - 1, TAG_PREV_ITEM, MPI_COMM_WORLD);
+            MPI_Recv(&current_array[start_i - 1], 1, MPI_DOUBLE, process_rank - 1, TAG_NEXT_ITEM, MPI_COMM_WORLD, &status);
+        }
+        if (process_rank != n_processes - 1) {
+            MPI_Send(&current_array[stop_i - 1], 1, MPI_DOUBLE, process_rank + 1, TAG_NEXT_ITEM, MPI_COMM_WORLD);
+            MPI_Recv(&current_array[stop_i], 1, MPI_DOUBLE, process_rank + 1, TAG_PREV_ITEM, MPI_COMM_WORLD, &status);
+        }
+
+        // Now we can just do the loop normally
+        for (i = start_i; i < stop_i; i++) {
+            next_array[i] = 2 * current_array[i] - old_array[i] + c * 
+                            (current_array[i - 1] - (2 * current_array[i] - 
+                             current_array[i + 1]));
+        }
+
+        // At the end, swap local arrays around
+        temp = old_array;
+        old_array = current_array;
+        current_array = next_array;
+        next_array = temp;
+    }
+
+    // Join up to main
+    if (process_rank == 0) {
+        // THE MAIN: Receive from each process
+        for (i = 1; i < n_processes; i++) {
+            // Compute properties for this process
+            process_start_i = i * process_share + 1;
+            if (i == n_processes - 1) {
+                // Take into account that the last process (potentially) does
+                //   more work
+                process_share = (i_max - 1) - process_start_i;
+            }
+            MPI_Recv(&current_array[process_start_i], process_share, MPI_DOUBLE, i, TAG_FINALIZE, MPI_COMM_WORLD, NULL);
+        }
+        MPI_Finalize();
+        return current_array;
+    } else {
+        /* Send the current array to the main so it can write */
+        MPI_Send(&current_array[start_i], stop_i - start_i, MPI_DOUBLE, 0, TAG_FINALIZE, MPI_COMM_WORLD);
+        MPI_Finalize();
+        // Exit program
+        exit(0);
+    }
 }
