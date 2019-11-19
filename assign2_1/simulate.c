@@ -78,7 +78,7 @@ double *simulate(const int i_max, const int t_max, double *old_array,
             MPI_Irecv(&current_array[stop_i], 1, MPI_DOUBLE, process_rank + 1, TAG_PREV_ITEM, MPI_COMM_WORLD, &recv_R);
         }
 
-        // Do the threads own computations
+        // Do the threads own computations while waiting for messages from neighbours
         for (i = start_i + 1; i < stop_i - 1; i++) {
             next_array[i] = compute(i, old_array, current_array);
         }
