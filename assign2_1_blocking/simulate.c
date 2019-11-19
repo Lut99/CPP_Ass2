@@ -56,21 +56,25 @@ double *simulate(const int i_max, const int t_max, double *old_array,
         stop_i = i_max - 1;
     }
 
-    // Now that we know this, do the timesteps
+    // Iterate over the timesteps
     for (t = 0; t < t_max; t++) {
         // First, make sure that current_array is up-to-date
         MPI_Status status;
         int number;
+
+        // All processes but the first send and listen to the left
         if (process_rank != 0) {
             MPI_Send(&current_array[start_i], 1, MPI_DOUBLE, process_rank - 1, TAG_PREV_ITEM, MPI_COMM_WORLD);
             MPI_Recv(&current_array[start_i - 1], 1, MPI_DOUBLE, process_rank - 1, TAG_NEXT_ITEM, MPI_COMM_WORLD, &status);
         }
+
+        // All processes but the last send and listen to the right
         if (process_rank != n_processes - 1) {
             MPI_Send(&current_array[stop_i - 1], 1, MPI_DOUBLE, process_rank + 1, TAG_NEXT_ITEM, MPI_COMM_WORLD);
             MPI_Recv(&current_array[stop_i], 1, MPI_DOUBLE, process_rank + 1, TAG_PREV_ITEM, MPI_COMM_WORLD, &status);
         }
 
-        // Now we can just do the loop normally
+        // Do the threads own computations
         for (i = start_i; i < stop_i; i++) {
             next_array[i] = 2 * current_array[i] - old_array[i] + c * 
                             (current_array[i - 1] - (2 * current_array[i] - 
@@ -84,9 +88,9 @@ double *simulate(const int i_max, const int t_max, double *old_array,
         next_array = temp;
     }
 
-    // Join up to main
+    // Main process: join together work from all other processes
     if (process_rank == 0) {
-        // THE MAIN: Receive from each process
+        // Receive from each process
         for (i = 1; i < n_processes; i++) {
             // Compute properties for this process
             process_start_i = i * process_share + 1;
@@ -100,10 +104,12 @@ double *simulate(const int i_max, const int t_max, double *old_array,
         MPI_Finalize();
         return current_array;
     } else {
-        /* Send the current array to the main so it can write */
+        // Non-main process: Send the current array to the main so it can write
         MPI_Send(&current_array[start_i], stop_i - start_i, MPI_DOUBLE, 0, TAG_FINALIZE, MPI_COMM_WORLD);
+        
         MPI_Finalize();
-        // Exit program
+        // Exit program without returning so only the main process return 
+        // the end-result
         exit(0);
     }
 }
